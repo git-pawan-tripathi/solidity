@@ -1,0 +1,15 @@
+pragma solidity ^0.5.5;
+
+contract AutomatedBased {
+
+  address referee;
+
+  modifier refereeOnly() {
+    require(msg.sender == referee);
+    _;
+  }
+
+  constructor() public {
+    referee = msg.sender;
+  }
+}

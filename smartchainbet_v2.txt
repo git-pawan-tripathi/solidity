@@ -1,0 +1,416 @@
+pragma solidity ^0.5.5;
+
+import './Automated_Resolution.sol';
+
+contract EventList is AutomatedBased {
+  
+  struct Events {
+    uint256 event_id;
+    uint256 event_date;
+    string teamH_id;
+    string teamA_id;
+    bool active;
+  }
+
+  struct Bets {
+    uint256 event_id;
+    uint256 bet_id;
+    uint256 event_date;
+    address payable betInitiator;
+    address payable betAcceptor;
+    string teamH_id;
+    string teamA_id;
+    string InitiatorTeamID_wins;
+    string AcceptorTeamID_wins;
+    uint256 bet_balance;
+    bool active;
+  }
+
+  mapping (uint => Events) public games;
+  mapping (uint => Bets) public bets;
+  
+  uint256 betCounter;
+  uint256 eventCounter;
+//   address payable smartchainWalletMartin = 0x3BB98d92e65229400Dc07FaA07E1e0D147e1a55a; // Change this to your own wallet address that will simulate Smartcahin.bet wallet
+  address payable smartchainWalletMartin = 0x1c322400C203d634928541a83cf702263e62472A;
+  address payable smartchainWalletWilliam = 0xe270b0797993D9f891F3D3A28A4c85Ec319F4648;
+  address payable smartchainWalletJC = 0x2D0116D4d80cd8e7406E32233Ea5551DCD315750;
+  address payable smartchainWalletJorge = 0xC04d04ADF6115b98749AfbF22cAF3e45eb878BAB;
+  uint256 fee = 0;
+  uint256 payout_perc = 100;
+
+
+  event LogPublishEvent(
+    uint256 indexed event_id,
+    uint256 event_date,
+    string teamH_id,
+    string teamA_id,
+    bool active
+    );
+
+  event LogOpenBet(
+    uint256 indexed event_id,
+    uint256 indexed bet_id,
+    uint256 accept_date,
+    address indexed betInitiator,
+    address betAcceptor,
+    string teamH_id,
+    string teamA_id,
+    uint256 initiator_bet,
+    uint256 acceptor_bet,
+    uint256 bet_balance
+  );
+
+  event LogAcceptBet(
+    uint256 indexed event_id,
+    uint256 indexed bet_id,
+    uint256 accept_date,
+    address indexed betInitiator,
+    address betAcceptor,
+    string teamH_id,
+    string teamA_id,
+    uint256 initiator_bet,
+    uint256 acceptor_bet,
+    uint256 bet_balance
+  );
+
+  event LogResolveBet(
+      uint256 indexed event_id,
+      uint256 indexed bet_id, 
+      uint256 resolve_date,
+      address betInitiator,
+      address betAcceptor,
+      uint256 wager,
+      uint256 acceptorWins, 
+      uint256 payout,
+      uint256 fee
+    );
+    
+  // Publish a new Event
+  function publishEvent(uint256 _event_id, uint256 _event_date,  _home_team, uint256 _away_team) payable public {
+    require(_event_id != 0);
+    require(_home_team != '');
+    require(_away_team != '');
+    require(_event_date != 0);
+
+    // Check that the bet does not exists in the blockchain already.
+    // Only checks for event_id (or GameID from data source)
+    bool exist = false;
+
+    // Iterate over all bets
+    for(uint i = 1; i <= eventCounter; i++) {
+      // Keep the ID if the bet is still available
+    //   if(bets[i].betAcceptor == 0x0000000000000000000000000000000000000000) {
+      if(games[i].event_id == _event_id) {
+        exist = true;
+      }
+    }
+
+    require(!exist);
+    
+    // A new bet
+    eventCounter++;
+    
+    // Store this bet into the contract
+    games[eventCounter] = Events(
+      _event_id,
+      _event_date,
+      _home_team,
+      _away_team,
+      true
+    );
+
+    // Trigger a log event
+    emit LogPublishEvent(_event_id, _event_date, _home_team, _away_team, true);
+
+  }
+
+  // Open a bet with event_id, bet_id, home_away, bet_balance
+  function OpenBet(uint256 _event_id, uint256 _event_bet_id, uint256 _bet_id, string _bet_team_id, uint256 _bet_balance) payable public {
+    // Check whether there is an event published
+    // Check that bet is higher than 0
+    require(_bet_balance > 0);
+    // Check that the bet has not been accepted yet
+    Events storage game = games[_event_bet_id];
+    Bets storage bet = bets[_bet_id];
+    require(bet.betAcceptor == 0x0000000000000000000000000000000000000000);
+    // The accepter must deposit his bet
+    require(msg.value == _bet_balance);
+    // Require that the event exists
+    require(game.event_id != 0);
+
+
+    string home = game.teamH_id;
+    string away = game.teamA_id;
+
+    betCounter++;
+    
+    bets[betCounter] = Bets(
+      _event_id,
+      betCounter,
+      now,
+      msg.sender,
+      0x0000000000000000000000000000000000000000,
+      home,
+      away,
+      _bet_team_id,
+      0,
+      _bet_balance,
+      true
+    );
+
+    // Trigger a log event
+    address(this).transfer(_bet_balance);
+    
+    emit LogOpenBet(_event_id, betCounter, now, msg.sender, 0x0000000000000000000000000000000000000000, home, away, _bet_team_id, 0, _bet_balance);
+  }
+
+  function acceptBet(uint256 _event_id, uint256 _bet_id, string _team_id, uint256 _bet_balance) payable public {
+    // Check whether there is a bet published
+    require(_bet_id > 0);
+    require(_team_id != '');
+    require(_bet_balance > 0);
+
+    // Retrieve the bet
+    Bets storage bet = bets[_bet_id];
+    // // Check that the bet exists
+    require(bet.event_id != 0);
+
+   
+    string home = bet.teamH_id;
+    string away = bet.teamA_id;
+
+    // // Check that the bet has not been accepted yet
+    require(bet.betAcceptor == 0x0000000000000000000000000000000000000000);
+
+    // // Don't allow the challenger to accept his own bet
+    require(msg.sender != bet.betInitiator);
+
+    // // The accepter must deposit his bet
+    require(msg.value == _bet_balance);
+
+    // uint256 AccTeamID_wins = _team_id;
+    // address payable betAcceptor = msg.sender;
+    
+    bet.AcceptorTeamID_wins = _team_id;
+    bet.betAcceptor = msg.sender;
+    bet.bet_balance += _bet_balance;
+
+    // Trigger a log event
+    // _bet_balance = msg.value;
+    address(this).transfer(_bet_balance);
+
+    emit LogAcceptBet(_event_id, _bet_id, now, bet.betInitiator, bet.betAcceptor, home, away, bet.InitiatorTeamID_wins, bet.AcceptorTeamID_wins, bet.bet_balance);
+  }
+
+  function resolveBet(uint256 _event_id, uint256 _bet_id, uint256 _acceptor_wins) payable public {
+    // Retrieve the bet
+    Bets storage bet = bets[_bet_id];
+
+    // The bet must not be open
+    require(bet.betAcceptor != 0x0000000000000000000000000000000000000000);
+
+    // // The bet must not have been paid out yet
+    require(bet.bet_balance > 0);
+
+    // Only the 4 of us can resolveBet
+    require((msg.sender == smartchainWalletMartin) || (msg.sender == smartchainWalletWilliam) || (msg.sender == smartchainWalletJC) || (msg.sender == smartchainWalletJorge));
+   
+    // payout = bet.bet_balance.mul(payout_perc).div(100);
+    uint256 payout = (bet.bet_balance*payout_perc)/100;
+    // uint256 fee_tokens = ((bet.bet_balance*fee)/100)/4;
+    uint256 fee_tokens = 0;
+    // uint256 fee_dollars = bet.bet_balance.mul(fee).div(100);
+    bet.bet_balance = 0;
+
+   // Execute payout
+    if (_acceptor_wins == 1) { // Acceptor wins
+      bet.betAcceptor.transfer(payout);
+    //   smartchainWalletMartin.transfer(fee_tokens);
+    //   smartchainWalletWilliam.transfer(fee_tokens);
+    //   smartchainWalletJC.transfer(fee_tokens);
+    //   smartchainWalletJorge.transfer(fee_tokens);
+    } else { // accepter wins
+      bet.betInitiator.transfer(payout);
+    //   smartchainWalletMartin.transfer(fee_tokens);
+    //   smartchainWalletWilliam.transfer(fee_tokens);
+    //   smartchainWalletJC.transfer(fee_tokens);
+    //   smartchainWalletJorge.transfer(fee_tokens);
+    }
+    
+    bet.active = false;
+    
+    // Trigger a log event
+    emit LogResolveBet(_event_id, _bet_id, now, bet.betInitiator, bet.betAcceptor, bet.bet_balance, _acceptor_wins, payout, fee_tokens);
+  }
+
+  function terminateAll() refereeOnly payable public {
+
+    // Cancel all open bets and return the deposits
+    for(uint i = 1; i <= betCounter; i++) {
+      if(bets[i].bet_balance > 0) { // The bet has not yet been paid out
+        if(bets[i].betAcceptor == 0x0000000000000000000000000000000000000000) { // The bet has only a challenger. Return ether to him.
+          uint256 payout = (bets[i].bet_balance*payout_perc) / 100;
+        //   uint256 fee_tokens = (bets[i].bet_balance*fee)/100;
+          bets[i].betInitiator.transfer(payout);
+        //   smartchainWalletMartin.transfer(fee_tokens);
+        //   smartchainWalletWilliam.transfer(fee_tokens);
+        //   smartchainWalletJC.transfer(fee_tokens);
+        //   smartchainWalletJorge.transfer(fee_tokens);
+        } else {
+          // bet has both a challenger and an accepter, but is not yet resolved. Cancel the bet and return deposits to both.
+          uint256 payout = (bets[i].bet_balance*payout_perc) / 100;
+        //   uint256 fee_tokens = (bets[i].bet_balance*fee)/100;
+          bets[i].betInitiator.transfer(payout/2);
+          bets[i].betInitiator.transfer(payout/2);
+        //   smartchainWalletMartin.transfer(fee_tokens);
+        //   smartchainWalletWilliam.transfer(fee_tokens);
+        //   smartchainWalletJC.transfer(fee_tokens);
+        //   smartchainWalletJorge.transfer(fee_tokens);
+        }
+        bets[i].bet_balance = 0;
+        bets[i].active = false;
+      }
+    }
+  }
+
+  function terminateOne(uint256 _bet_id) refereeOnly payable public {
+
+    // Cancel all open bets and return the deposits
+    Bets storage bet = bets[_bet_id];
+
+    if(bet.bet_balance > 0) { // The bet has not yet been paid out
+        if(bet.betAcceptor == 0x0000000000000000000000000000000000000000) { // The bet has only a challenger. Return ether to him.
+          uint256 payout = (bet.bet_balance*payout_perc) / 100;
+        //   uint256 fee_tokens = (bet.bet_balance*fee)/100;
+          bet.betInitiator.transfer(payout);
+        //   smartchainWalletMartin.transfer(fee_tokens);
+        //   smartchainWalletWilliam.transfer(fee_tokens);
+        //   smartchainWalletJC.transfer(fee_tokens);
+        //   smartchainWalletJorge.transfer(fee_tokens);
+        } else {
+          // bet has both a challenger and an accepter, but is not yet resolved. Cancel the bet and return deposits to both.
+          uint256 payout = (bet.bet_balance*payout_perc) / 100;
+        //   uint256 fee_tokens = (bet.bet_balance*fee)/100;
+          bet.betInitiator.transfer(payout/2);
+          bet.betAcceptor.transfer(payout/2);
+        //   smartchainWalletMartin.transfer(fee_tokens);
+        //   smartchainWalletWilliam.transfer(fee_tokens);
+        //   smartchainWalletJC.transfer(fee_tokens);
+        //   smartchainWalletJorge.transfer(fee_tokens);
+        }
+        bet.bet_balance = 0;
+        bet.active = false;
+      }
+  }
+
+  function getContractBalance() public view returns (uint256) { //view amount of ETH the contract contains
+    return address(this).balance;
+  }
+
+  // Fetch and return all bet IDs for bets that are still available
+  function getAvailableEvents() public view returns (uint256[] memory) {
+    uint[] memory eventIds = new uint[](eventCounter);
+    uint numberOfAvailableEvents = 0;
+
+    // Iterate over all Events
+    for(uint i = 1; i <= eventCounter; i++) {
+      // Keep the ID if the bet is still available
+      if(games[i].active == true) {
+        eventIds[numberOfAvailableEvents] = games[i].event_id;
+        numberOfAvailableEvents++;
+      }
+    }
+
+    uint[] memory availableEvents = new uint[](numberOfAvailableEvents);
+
+    // Copy the betIds array into a smaller availableBets array to get rid of empty indexes
+    for(uint j = 0; j < numberOfAvailableEvents; j++) {
+      availableEvents[j] = eventIds[j];
+    }
+
+    return availableEvents;
+  }
+
+  function getMatchedBets() public view returns (uint[] memory) {
+    uint[] memory betIds = new uint[](betCounter);
+    uint numberOfMatchedbets = 0;
+
+    // Iterate over all bets
+    for(uint i = 1; i <= betCounter; i++) {
+      // Keep the ID if the bet is still available
+      if(bets[i].betAcceptor != 0x0000000000000000000000000000000000000000) {
+         if(bets[i].active) {
+            betIds[numberOfMatchedbets] = bets[i].bet_id;
+            numberOfMatchedbets++;
+         }
+      }
+    }
+
+    uint[] memory matchedBets = new uint[](numberOfMatchedbets);
+
+    // Copy the betIds array into a smaller availableBets array to get rid of empty indexes
+    for(uint j = 0; j < numberOfMatchedbets; j++) {
+      matchedBets[j] = betIds[j];
+    }
+ 
+    return matchedBets;
+  }
+  
+  // Fetch and return all bet IDs for bets that are still available
+  function getAvailableBets() public view returns (uint[] memory) {
+    uint[] memory betIds = new uint[](betCounter);
+    uint numberOfAvailablebets = 0;
+
+    // Iterate over all bets
+    for(uint i = 1; i <= betCounter; i++) {
+      // Keep the ID if the bet is still available
+      if(bets[i].betAcceptor == 0x0000000000000000000000000000000000000000) {
+         if(bets[i].active) {
+            betIds[numberOfAvailablebets] = bets[i].bet_id;
+            numberOfAvailablebets++;
+         }
+      }
+    }
+
+    uint[] memory availableBets = new uint[](numberOfAvailablebets);
+
+    // Copy the betIds array into a smaller availableBets array to get rid of empty indexes
+    for(uint j = 0; j < numberOfAvailablebets; j++) {
+      availableBets[j] = betIds[j];
+    }
+ 
+    return availableBets;
+  }
+  
+  // Fetch and return all bet IDs for bets that are still available
+  function getResolvedBets() public view returns (uint[] memory) {
+    uint[] memory betIds = new uint[](betCounter);
+    uint numberOfResolvedBets = 0;
+
+    // Iterate over all bets
+    for(uint i = 1; i <= betCounter; i++) {
+      // Keep the ID if the bet is still available
+      if (bets[i].bet_balance == 0) {
+        if (bets[i].betAcceptor != 0x0000000000000000000000000000000000000000) {
+           betIds[numberOfResolvedBets] = bets[i].bet_id;
+           numberOfResolvedBets++;
+        }
+      }
+    }
+
+    uint[] memory resolvedBets = new uint[](numberOfResolvedBets);
+
+    // Copy the betIds array into a smaller availableBets array to get rid of empty indexes
+    for(uint j = 0; j < numberOfResolvedBets; j++) {
+      resolvedBets[j] = betIds[j];
+    }
+ 
+    return resolvedBets;
+  }
+  
+  
+  function() external payable {
+  // this function enables the contract to receive funds
+    }
+}
